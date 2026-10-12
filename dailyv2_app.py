@@ -36,24 +36,15 @@ if uploaded_file:
     # CZYSZCZENIE
     # ====================================
 
-    df = df[
-        df["Data"].notna()
-    ]
-
-    df = df[
-        df["Maszyna-Urządzenie"].notna()
-    ]
-
-    # Data jako tekst -> data
+    df = df[df["Data"].notna()]
+    df = df[df["Maszyna-Urządzenie"].notna()]
 
     df["Data"] = pd.to_datetime(
         df["Data"].astype(str),
         errors="coerce"
     )
 
-    df = df[
-        df["Data"].notna()
-    ]
+    df = df[df["Data"].notna()]
 
     # ====================================
     # CZAS
@@ -62,20 +53,12 @@ if uploaded_file:
     def czas_na_minuty(x):
 
         try:
-
-            td = pd.to_timedelta(
-                str(x)
-            )
-
+            td = pd.to_timedelta(str(x))
             return td.total_seconds() / 60
-
         except:
-
             return 0
 
-    df["Czas_min"] = df["Czas"].apply(
-        czas_na_minuty
-    )
+    df["Czas_min"] = df["Czas"].apply(czas_na_minuty)
 
     # ====================================
     # FILTRY
@@ -141,6 +124,7 @@ if uploaded_file:
 
     hale = sorted(
         df_filtered["Hala"]
+        .dropna()
         .astype(str)
         .unique()
     )
@@ -163,6 +147,7 @@ if uploaded_file:
 
     zmiany = sorted(
         df_filtered["Zmiana"]
+        .dropna()
         .astype(str)
         .unique()
     )
@@ -178,6 +163,41 @@ if uploaded_file:
         .astype(str)
         .isin(wybrane_zmiany)
     ]
+
+    # ====================================
+    # KATEGORIA AWARII
+    # ====================================
+
+    if "Kategoria awarii" in df_filtered.columns:
+
+        kategorie = sorted(
+            df_filtered["Kategoria awarii"]
+            .dropna()
+            .astype(str)
+            .unique()
+        )
+
+        default_kategorie = []
+
+        for kat in kategorie:
+
+            if kat.lower().strip() == "utrzymanie ruchu":
+                default_kategorie.append(kat)
+
+        if len(default_kategorie) == 0:
+            default_kategorie = kategorie
+
+        wybrane_kategorie = st.sidebar.multiselect(
+            "Kategoria awarii",
+            kategorie,
+            default=default_kategorie
+        )
+
+        df_filtered = df_filtered[
+            df_filtered["Kategoria awarii"]
+            .astype(str)
+            .isin(wybrane_kategorie)
+        ]
 
     # ====================================
     # KPI
@@ -202,9 +222,7 @@ if uploaded_file:
 
     przeglady = len(
         df_filtered[
-            df_filtered[
-                "Podkategoria awarii"
-            ]
+            df_filtered["Podkategoria awarii"]
             .astype(str)
             .str.contains(
                 "przegl",
@@ -216,9 +234,7 @@ if uploaded_file:
 
     zadania = len(
         df_filtered[
-            df_filtered[
-                "Podkategoria awarii"
-            ]
+            df_filtered["Podkategoria awarii"]
             .astype(str)
             .str.contains(
                 "zadanie",
@@ -228,10 +244,9 @@ if uploaded_file:
         ]
     )
 
-    awarie = (
-        zdarzenia -
-        przeglady -
-        zadania
+    awarie = max(
+        zdarzenia - przeglady - zadania,
+        0
     )
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -241,13 +256,13 @@ if uploaded_file:
     c3.metric("Przeglądy", przeglady)
     c4.metric("Zadania", zadania)
     c5.metric("Maszyny", maszyny)
-    c6.metric("MTTR", mttr)
+    c6.metric("MTTR [min]", mttr)
+
+    st.divider()
 
     # ====================================
     # RAPORT
     # ====================================
-
-    st.divider()
 
     if len(df_filtered) > 0:
 
@@ -259,17 +274,28 @@ if uploaded_file:
             .index[0]
         )
 
+        top_przyczyna = (
+            df_filtered[
+                "Podkategoria awarii"
+            ]
+            .fillna("Brak")
+            .value_counts()
+            .index[0]
+        )
+
         st.info(
             f"""
 W analizowanym okresie zarejestrowano {zdarzenia} zdarzeń.
 
 Łączny czas działań wyniósł {czas_h} godzin.
 
+Średni czas interwencji wyniósł {mttr} minut.
+
 Najczęściej obsługiwaną maszyną była:
 {top_maszyna}.
 
-Średni czas działania wyniósł
-{mttr} minut.
+Najczęściej występująca podkategoria:
+{top_przyczyna}.
 """
         )
 
@@ -280,9 +306,7 @@ Najczęściej obsługiwaną maszyną była:
     st.subheader("TOP 10 maszyn")
 
     top_maszyny = (
-        df_filtered[
-            "Maszyna-Urządzenie"
-        ]
+        df_filtered["Maszyna-Urządzenie"]
         .value_counts()
         .head(10)
         .reset_index()
@@ -312,9 +336,7 @@ Najczęściej obsługiwaną maszyną była:
     st.subheader("TOP przyczyn")
 
     top_przyczyny = (
-        df_filtered[
-            "Podkategoria awarii"
-        ]
+        df_filtered["Podkategoria awarii"]
         .fillna("Brak")
         .value_counts()
         .head(10)
@@ -339,4 +361,75 @@ Najczęściej obsługiwaną maszyną była:
 
     # ====================================
     # TREND
-    # ===========
+    # ====================================
+
+    st.subheader("Trend zgłoszeń")
+
+    trend = (
+        df_filtered
+        .groupby(df_filtered["Data"].dt.date)
+        .size()
+        .reset_index(name="Liczba")
+    )
+
+    fig3 = px.line(
+        trend,
+        x="Data",
+        y="Liczba",
+        markers=True
+    )
+
+    st.plotly_chart(
+        fig3,
+        use_container_width=True
+    )
+
+    # ====================================
+    # PRACOWNICY
+    # ====================================
+
+    st.subheader("Ranking pracowników")
+
+    osoby = []
+
+    for wpis in df_filtered[
+        "Osoba usuwająca postój, awarię"
+    ].dropna():
+
+        for osoba in (
+            str(wpis)
+            .replace(",", "\n")
+            .split("\n")
+        ):
+
+            osoba = osoba.strip()
+
+            if osoba:
+                osoby.append(osoba)
+
+    if osoby:
+
+        ranking = (
+            pd.Series(osoby)
+            .value_counts()
+            .head(20)
+        )
+
+        st.bar_chart(ranking)
+
+        st.dataframe(
+            ranking.rename(
+                "Liczba interwencji"
+            )
+        )
+
+    # ====================================
+    # DANE
+    # ====================================
+
+    with st.expander("Pokaż dane"):
+
+        st.dataframe(
+            df_filtered,
+            use_container_width=True
+        )
