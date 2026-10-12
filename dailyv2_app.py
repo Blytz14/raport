@@ -22,4 +22,3 @@ if uploaded_file:
     st.subheader("Pierwsze 10 wierszy")
 
     st.dataframe(df.head(10))
-`
