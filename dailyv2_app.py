@@ -1,322 +1,14 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-
-st.set_page_config(
-    page_title="UR Insight",
-    page_icon="🔧",
-    layout="wide"
-)
-
-st.title("🔧 UR Insight")
-st.subheader("Analiza rejestru awarii UR")
-
-uploaded_file = st.file_uploader(
-    "Wybierz rejestr awarii XLSX",
-    type=["xlsx"]
-)
-
-if uploaded_file:
-
     # ====================================
-    # WCZYTANIE PLIKU
-    # ====================================
-
-    df = pd.read_excel(
-        uploaded_file,
-        header=2
-    )
-
-    df.columns = [
-        str(c).strip()
-        for c in df.columns
-    ]
-
-    # ====================================
-    # CZYSZCZENIE
-    # ====================================
-
-    df = df[df["Data"].notna()]
-
-    if "Maszyna-Urządzenie" in df.columns:
-        df = df[df["Maszyna-Urządzenie"].notna()]
-
-    df["Data"] = pd.to_datetime(
-        df["Data"].astype(str),
-        errors="coerce"
-    )
-
-    df = df[df["Data"].notna()]
-
-    # ====================================
-    # NORMALIZACJA
-    # ====================================
-
-    df["Kategoria awarii"] = (
-        df["Kategoria awarii"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-    )
-
-    df["Podkategoria awarii"] = (
-        df["Podkategoria awarii"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-    )
-
-    # ====================================
-    # CZAS
-    # ====================================
-
-    def czas_na_minuty(val):
-
-        try:
-
-            td = pd.to_timedelta(str(val))
-
-            return td.total_seconds() / 60
-
-        except:
-
-            return 0
-
-    df["Czas_min"] = df["Czas"].apply(
-        czas_na_minuty
-    )
-
-    # ====================================
-    # FILTRY
-    # ====================================
-
-    st.sidebar.header("Filtry")
-
-    okres = st.sidebar.selectbox(
-        "Zakres danych",
-        [
-            "Cały plik",
-            "Bieżący tydzień",
-            "Bieżący miesiąc",
-            "Własny zakres"
-        ]
-    )
-
-    df_filtered = df.copy()
-
-    today = pd.Timestamp.today()
-
-    if okres == "Bieżący tydzień":
-
-        start = today - pd.Timedelta(
-            days=today.weekday()
-        )
-
-        stop = start + pd.Timedelta(days=6)
-
-        df_filtered = df[
-            (df["Data"] >= start)
-            &
-            (df["Data"] <= stop)
-        ]
-
-    elif okres == "Bieżący miesiąc":
-
-        df_filtered = df[
-            (df["Data"].dt.month == today.month)
-            &
-            (df["Data"].dt.year == today.year)
-        ]
-
-    elif okres == "Własny zakres":
-
-        data_od = st.sidebar.date_input(
-            "Data od"
-        )
-
-        data_do = st.sidebar.date_input(
-            "Data do"
-        )
-
-        df_filtered = df[
-            (df["Data"] >= pd.Timestamp(data_od))
-            &
-            (df["Data"] <= pd.Timestamp(data_do))
-        ]
-
-    # ====================================
-    # HALA
-    # ====================================
-
-    hale = sorted(
-        df_filtered["Hala"]
-        .dropna()
-        .astype(str)
-        .unique()
-    )
-
-    wybrane_hale = st.sidebar.multiselect(
-        "Hala",
-        hale,
-        default=hale
-    )
-
-    df_filtered = df_filtered[
-        df_filtered["Hala"]
-        .astype(str)
-        .isin(wybrane_hale)
-    ]
-
-    # ====================================
-    # ZMIANA
-    # ====================================
-
-    zmiany = sorted(
-        df_filtered["Zmiana"]
-        .dropna()
-        .astype(str)
-        .unique()
-    )
-
-    wybrane_zmiany = st.sidebar.multiselect(
-        "Zmiana",
-        zmiany,
-        default=zmiany
-    )
-
-    df_filtered = df_filtered[
-        df_filtered["Zmiana"]
-        .astype(str)
-        .isin(wybrane_zmiany)
-    ]
-
-    # ====================================
-    # KATEGORIA
-    # ====================================
-
-    kategorie = sorted(
-        df_filtered["Kategoria awarii"]
-        .unique()
-    )
-
-    domyslne = [
-        x for x in kategorie
-        if "utrzymanie" in x.lower()
-    ]
-
-    if not domyslne:
-        domyslne = kategorie
-
-    wybrane_kategorie = st.sidebar.multiselect(
-        "Kategoria awarii",
-        kategorie,
-        default=domyslne
-    )
-
-    df_filtered = df_filtered[
-        df_filtered["Kategoria awarii"]
-        .isin(wybrane_kategorie)
-    ]
-
-    # ====================================
-    # PODKATEGORIA
-    # ====================================
-
-    podkategorie = sorted(
-        df_filtered["Podkategoria awarii"]
-        .unique()
-    )
-
-    wybrane_podkategorie = st.sidebar.multiselect(
-        "Podkategoria awarii",
-        podkategorie,
-        default=podkategorie
-    )
-
-    df_filtered = df_filtered[
-        df_filtered["Podkategoria awarii"]
-        .isin(wybrane_podkategorie)
-    ]
-
-    # ====================================
-    # KPI
-    # ====================================
-
-    zdarzenia = len(df_filtered)
-
-    postoj_h = round(
-        df_filtered["Czas_min"].sum() / 60,
-        2
-    )
-
-    mttr = round(
-        df_filtered["Czas_min"].mean(),
-        1
-    ) if zdarzenia > 0 else 0
-
-    maszyny = (
-        df_filtered["Maszyna-Urządzenie"]
-        .nunique()
-    )
-
-    przeglady = len(
-        df_filtered[
-            df_filtered["Podkategoria awarii"]
-            .str.contains(
-                "przegl",
-                case=False,
-                na=False
-            )
-        ]
-    )
-
-    awarie = max(
-        zdarzenia - przeglady,
-        0
-    )
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-
-    c1.metric(
-        "Zdarzenia",
-        zdarzenia
-    )
-
-    c2.metric(
-        "Awarie",
-        awarie
-    )
-
-    c3.metric(
-        "Przeglądy",
-        przeglady
-    )
-
-    c4.metric(
-        "Postoje [h]",
-        postoj_h
-    )
-
-    c5.metric(
-        "MTTR [min]",
-        mttr
-    )
-
-    st.divider()
-
-    # ====================================
-    # TOP 5 MASZYN WG CZASU POSTOJÓW
+    # TOP 5 TYPÓW MASZYN WG CZASU POSTOJÓW
     # ====================================
 
     st.subheader(
-        "TOP 5 maszyn wg czasu postojów"
+        "TOP 5 typów maszyn wg czasu postojów"
     )
 
     top_postoje = (
         df_filtered
-        .groupby(
-            "Maszyna-Urządzenie"
-        )["Czas_min"]
+        .groupby("Typ")["Czas_min"]
         .sum()
         .sort_values(
             ascending=False
@@ -332,9 +24,10 @@ if uploaded_file:
 
     fig_postoje = px.bar(
         top_postoje,
-        x="Maszyna-Urządzenie",
+        x="Typ",
         y="Godziny",
-        color="Godziny"
+        color="Godziny",
+        text="Godziny"
     )
 
     st.plotly_chart(
@@ -345,7 +38,7 @@ if uploaded_file:
     st.dataframe(
         top_postoje[
             [
-                "Maszyna-Urządzenie",
+                "Typ",
                 "Godziny"
             ]
         ],
@@ -379,6 +72,7 @@ if uploaded_file:
         top_awarie[
             [
                 "Data",
+                "Typ",
                 "Maszyna-Urządzenie",
                 "Podkategoria awarii",
                 "Godziny"
@@ -402,16 +96,17 @@ if uploaded_file:
         .reset_index()
     )
 
-    top_przyczyny.columns = (
+    top_przyczyny.columns = [
         "Przyczyna",
         "Liczba"
-    )
+    ]
 
     fig2 = px.bar(
         top_przyczyny,
         x="Przyczyna",
         y="Liczba",
-        color="Liczba"
+        color="Liczba",
+        text="Liczba"
     )
 
     st.plotly_chart(
@@ -433,7 +128,9 @@ if uploaded_file:
             df_filtered["Data"].dt.date
         )
         .size()
-        .reset_index(name="Liczba")
+        .reset_index(
+            name="Liczba"
+        )
     )
 
     fig3 = px.line(
@@ -454,8 +151,8 @@ if uploaded_file:
 
     if len(df_filtered):
 
-        top_maszyna = (
-            top_postoje.iloc[0]["Maszyna-Urządzenie"]
+        top_typ = (
+            top_postoje.iloc[0]["Typ"]
         )
 
         top_czas = (
@@ -470,10 +167,17 @@ W analizowanym okresie odnotowano {zdarzenia} zdarzeń.
 
 Średni czas zdarzenia (MTTR) wyniósł {mttr} minut.
 
-Największy udział w postojach miała maszyna:
-{top_maszyna} ({top_czas} h).
+Największy udział w postojach miał typ maszyny:
 
-Zaleca się analizę przyczyn źródłowych dla maszyn generujących największe straty czasu.
+{top_typ}
+
+Łączny czas postojów dla tego typu wyniósł:
+
+{top_czas} h.
+
+Zaleca się przeprowadzenie analizy przyczyn źródłowych
+oraz zwiększenie działań prewencyjnych dla maszyn
+tego typu.
 """
         )
 
@@ -481,7 +185,9 @@ Zaleca się analizę przyczyn źródłowych dla maszyn generujących największe
     # DANE
     # ====================================
 
-    with st.expander("Pokaż dane źródłowe"):
+    with st.expander(
+        "Pokaż dane źródłowe"
+    ):
 
         st.dataframe(
             df_filtered,
