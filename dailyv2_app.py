@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import date, timedelta
 
 st.set_page_config(
     page_title="UR Insight",
@@ -10,55 +9,73 @@ st.set_page_config(
 )
 
 st.title("🔧 UR Insight")
-st.subheader("Analiza rejestru awarii Utrzymania Ruchu")
+st.subheader("Analiza rejestru awarii UR")
 
 uploaded_file = st.file_uploader(
-    "Wybierz plik XLSX",
+    "Wybierz rejestr awarii XLSX",
     type=["xlsx"]
 )
 
 if uploaded_file:
 
-    df = pd.read_excel(uploaded_file)
+    # -------------------------
+    # ODCZYT EXCELA
+    # -------------------------
 
-    df.columns = [str(c).strip() for c in df.columns]
+    df = pd.read_excel(
+        uploaded_file,
+        header=2
+    )
 
-    # -----------------
-    # DATY
-    # -----------------
+    df.columns = [
+        str(c).strip()
+        for c in df.columns
+    ]
 
-    if "Data" in df.columns:
-        df["Data"] = pd.to_datetime(
-            df["Data"],
-            errors="coerce"
-        )
+    df = df.dropna(
+        subset=["Data"],
+        errors="ignore"
+    )
 
-    # -----------------
+    # -------------------------
+    # DATA
+    # -------------------------
+
+    df["Data"] = pd.to_datetime(
+        df["Data"],
+        errors="coerce"
+    )
+
+    # -------------------------
     # CZAS
-    # -----------------
+    # -------------------------
 
-    if "Czas" in df.columns:
+    def convert_time_to_minutes(value):
 
-        def parse_time(x):
-            try:
-                parts = str(x).split(":")
-                return int(parts[0]) * 60 + int(parts[1])
-            except:
-                return 0
+        try:
 
-        df["Czas_min"] = df["Czas"].astype(str).apply(parse_time)
+            td = pd.to_timedelta(
+                str(value)
+            )
 
-    else:
-        df["Czas_min"] = 0
+            return td.total_seconds() / 60
 
-    # ===========================
-    # FILTRY
-    # ===========================
+        except:
+
+            return 0
+
+    df["Czas_min"] = df["Czas"].apply(
+        convert_time_to_minutes
+    )
+
+    # -------------------------
+    # SIDEBAR
+    # -------------------------
 
     st.sidebar.header("Filtry")
 
-    okres = st.sidebar.selectbox(
-        "Zakres danych",
+    zakres = st.sidebar.radio(
+        "Okres",
         [
             "Dzisiaj",
             "Bieżący tydzień",
@@ -69,68 +86,57 @@ if uploaded_file:
 
     today = pd.Timestamp.today().normalize()
 
-    if okres == "Dzisiaj":
+    if zakres == "Dzisiaj":
 
-        start_date = today
-        end_date = today
+        data_od = today
+        data_do = today
 
-    elif okres == "Bieżący tydzień":
+    elif zakres == "Bieżący tydzień":
 
-        start_date = today - pd.Timedelta(
+        data_od = today - pd.Timedelta(
             days=today.weekday()
         )
 
-        end_date = start_date + pd.Timedelta(days=6)
+        data_do = data_od + pd.Timedelta(days=6)
 
-    elif okres == "Bieżący miesiąc":
+    elif zakres == "Bieżący miesiąc":
 
-        start_date = today.replace(day=1)
-
-        if today.month == 12:
-            end_date = pd.Timestamp(
-                year=today.year + 1,
-                month=1,
-                day=1
-            ) - pd.Timedelta(days=1)
-        else:
-            end_date = pd.Timestamp(
-                year=today.year,
-                month=today.month + 1,
-                day=1
-            ) - pd.Timedelta(days=1)
+        data_od = today.replace(day=1)
+        data_do = today
 
     else:
 
-        start_date = pd.Timestamp(
+        data_od = pd.Timestamp(
             st.sidebar.date_input(
-                "Data od",
-                value=today.date()
+                "Data od"
             )
         )
 
-        end_date = pd.Timestamp(
+        data_do = pd.Timestamp(
             st.sidebar.date_input(
-                "Data do",
-                value=today.date()
+                "Data do"
             )
         )
 
     df_filtered = df.copy()
 
-    if "Data" in df.columns:
+    df_filtered = df_filtered[
+        (df_filtered["Data"] >= data_od)
+        &
+        (df_filtered["Data"] <= data_do)
+    ]
 
-        df_filtered = df_filtered[
-            (df_filtered["Data"] >= start_date)
-            &
-            (df_filtered["Data"] <= end_date)
-        ]
-
-    # Hala
+    # -------------------------
+    # HALA
+    # -------------------------
 
     if "Hala" in df.columns:
 
         hale = sorted(
-            df["Hala"].dropna().astype(str).unique()
+            df["Hala"]
+            .dropna()
+            .astype(str)
+            .unique()
         )
 
         selected_hale = st.sidebar.multiselect(
@@ -140,16 +146,22 @@ if uploaded_file:
         )
 
         df_filtered = df_filtered[
-            df_filtered["Hala"].astype(str)
+            df_filtered["Hala"]
+            .astype(str)
             .isin(selected_hale)
         ]
 
-    # Zmiana
+    # -------------------------
+    # ZMIANA
+    # -------------------------
 
     if "Zmiana" in df.columns:
 
         zmiany = sorted(
-            df["Zmiana"].dropna().astype(str).unique()
+            df["Zmiana"]
+            .dropna()
+            .astype(str)
+            .unique()
         )
 
         selected_zmiany = st.sidebar.multiselect(
@@ -159,239 +171,310 @@ if uploaded_file:
         )
 
         df_filtered = df_filtered[
-            df_filtered["Zmiana"].astype(str)
+            df_filtered["Zmiana"]
+            .astype(str)
             .isin(selected_zmiany)
         ]
 
-    # ===========================
+    # -------------------------
     # KPI
-    # ===========================
+    # -------------------------
 
     liczba_zdarzen = len(df_filtered)
 
-    czas_min = df_filtered["Czas_min"].sum()
+    laczny_czas_min = (
+        df_filtered["Czas_min"].sum()
+    )
 
-    czas_h = round(czas_min / 60, 2)
+    laczny_czas_h = round(
+        laczny_czas_min / 60,
+        1
+    )
 
     mttr = round(
         df_filtered["Czas_min"].mean(),
         1
     ) if liczba_zdarzen > 0 else 0
 
-    liczba_maszyn = 0
+    liczba_maszyn = (
+        df_filtered["Maszyna-Urządzenie"]
+        .nunique()
+    )
 
-    if "Maszyna-Urządzenie" in df_filtered.columns:
-        liczba_maszyn = (
-            df_filtered["Maszyna-Urządzenie"]
-            .nunique()
-        )
+    awarie = len(
+        df_filtered[
+            ~df_filtered[
+                "Podkategoria awarii"
+            ]
+            .astype(str)
+            .str.contains(
+                "przegląd|zadanie",
+                case=False,
+                na=False
+            )
+        ]
+    )
 
-    col1, col2, col3, col4 = st.columns(4)
+    przeglady = len(
+        df_filtered[
+            df_filtered[
+                "Podkategoria awarii"
+            ]
+            .astype(str)
+            .str.contains(
+                "przegląd",
+                case=False,
+                na=False
+            )
+        ]
+    )
 
-    col1.metric(
-        "Interwencje",
+    zadania = len(
+        df_filtered[
+            df_filtered[
+                "Podkategoria awarii"
+            ]
+            .astype(str)
+            .str.contains(
+                "zadanie",
+                case=False,
+                na=False
+            )
+        ]
+    )
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+
+    c1.metric(
+        "Zdarzenia",
         liczba_zdarzen
     )
 
-    col2.metric(
-        "Czas awarii [h]",
-        czas_h
+    c2.metric(
+        "Awarie",
+        awarie
     )
 
-    col3.metric(
+    c3.metric(
+        "Przeglądy",
+        przeglady
+    )
+
+    c4.metric(
+        "Zadania",
+        zadania
+    )
+
+    c5.metric(
+        "Czas [h]",
+        laczny_czas_h
+    )
+
+    c6.metric(
         "MTTR [min]",
         mttr
     )
 
-    col4.metric(
-        "Maszyny",
-        liczba_maszyn
-    )
-
-    # ===========================
-    # RAPORT AI
-    # ===========================
+    # -------------------------
+    # RAPORT
+    # -------------------------
 
     st.divider()
 
-    st.subheader("Komentarz menedżerski")
-
     top_machine = "-"
-    top_category = "-"
-    top_employee = "-"
 
-    if (
-        "Maszyna-Urządzenie"
-        in df_filtered.columns
-    ) and len(df_filtered):
+    if len(df_filtered):
 
         top_machine = (
-            df_filtered["Maszyna-Urządzenie"]
-            .value_counts()
-            .index[0]
-        )
-
-    if (
-        "Podkategoria awarii"
-        in df_filtered.columns
-    ) and len(df_filtered):
-
-        top_category = (
-            df_filtered["Podkategoria awarii"]
-            .astype(str)
-            .value_counts()
-            .index[0]
-        )
-
-    if (
-        "Osoba usuwająca postój, awarię"
-        in df_filtered.columns
-    ) and len(df_filtered):
-
-        top_employee = (
             df_filtered[
-                "Osoba usuwająca postój, awarię"
+                "Maszyna-Urządzenie"
+            ]
+            .value_counts()
+            .index[0]
+        )
+
+    top_reason = "-"
+
+    if len(df_filtered):
+
+        top_reason = (
+            df_filtered[
+                "Podkategoria awarii"
             ]
             .astype(str)
             .value_counts()
             .index[0]
         )
 
+    st.subheader(
+        "Komentarz menedżerski"
+    )
+
     st.info(
         f"""
-W analizowanym okresie wykonano {liczba_zdarzen} interwencji.
+W analizowanym okresie odnotowano {liczba_zdarzen} zdarzeń.
 
-Łączny czas działań wyniósł {czas_h} godzin.
+Łączny czas działań wyniósł {laczny_czas_h} godzin.
 
-Średni czas interwencji (MTTR) wyniósł {mttr} minut.
+Średni czas interwencji MTTR wyniósł {mttr} minut.
 
-Najwięcej zgłoszeń dotyczyło maszyny:
+Zarejestrowano {awarie} awarii,
+{przeglady} przeglądów oraz
+{zadania} zadań planowanych.
+
+Najczęściej obsługiwaną maszyną była:
 {top_machine}.
 
-Dominująca podkategoria:
-{top_category}.
-
-Największe zaangażowanie wykazali:
-{top_employee}.
-
-Zaleca się przeanalizowanie przyczyn najczęściej
-występujących zdarzeń oraz wdrożenie działań
-prewencyjnych dla najbardziej awaryjnych maszyn.
+Najczęściej występująca podkategoria:
+{top_reason}.
 """
     )
 
-    st.divider()
+    # -------------------------
+    # TABS
+    # -------------------------
 
     tab1, tab2, tab3 = st.tabs(
         [
             "Dashboard",
-            "Raport tygodniowy",
+            "Pracownicy",
             "Dane"
         ]
     )
 
-    # ===========================
+    # -------------------------
     # DASHBOARD
-    # ===========================
+    # -------------------------
 
     with tab1:
 
-        if (
-            "Maszyna-Urządzenie"
-            in df_filtered.columns
-        ):
+        st.subheader("TOP 10 maszyn")
 
-            top10 = (
-                df_filtered[
-                    "Maszyna-Urządzenie"
-                ]
-                .value_counts()
-                .head(10)
-                .reset_index()
-            )
-
-            top10.columns = [
-                "Maszyna",
-                "Liczba"
+        top_maszyny = (
+            df_filtered[
+                "Maszyna-Urządzenie"
             ]
+            .value_counts()
+            .head(10)
+            .reset_index()
+        )
 
-            fig = px.bar(
-                top10,
-                x="Maszyna",
-                y="Liczba",
-                title="TOP 10 maszyn"
-            )
+        top_maszyny.columns = [
+            "Maszyna",
+            "Liczba"
+        ]
 
-            st.plotly_chart(
-                fig,
-                use_container_width=True
-            )
+        fig = px.bar(
+            top_maszyny,
+            x="Maszyna",
+            y="Liczba"
+        )
 
-        if (
-            "Podkategoria awarii"
-            in df_filtered.columns
-        ):
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
 
-            top_cat = (
-                df_filtered[
-                    "Podkategoria awarii"
-                ]
-                .astype(str)
-                .value_counts()
-                .head(10)
-                .reset_index()
-            )
+        st.subheader(
+            "TOP 10 przyczyn"
+        )
 
-            top_cat.columns = [
-                "Przyczyna",
-                "Liczba"
+        top_przyczyny = (
+            df_filtered[
+                "Podkategoria awarii"
             ]
+            .astype(str)
+            .value_counts()
+            .head(10)
+            .reset_index()
+        )
 
-            fig2 = px.bar(
-                top_cat,
-                x="Przyczyna",
-                y="Liczba",
-                title="TOP 10 przyczyn"
+        top_przyczyny.columns = [
+            "Przyczyna",
+            "Liczba"
+        ]
+
+        fig2 = px.bar(
+            top_przyczyny,
+            x="Przyczyna",
+            y="Liczba"
+        )
+
+        st.plotly_chart(
+            fig2,
+            use_container_width=True
+        )
+
+        trend = (
+            df_filtered
+            .groupby(
+                df_filtered["Data"].dt.date
             )
+            .size()
+            .reset_index(name="Liczba")
+        )
 
-            st.plotly_chart(
-                fig2,
-                use_container_width=True
-            )
+        fig3 = px.line(
+            trend,
+            x="Data",
+            y="Liczba",
+            markers=True,
+            title="Trend zgłoszeń"
+        )
 
-    # ===========================
-    # TREND
-    # ===========================
+        st.plotly_chart(
+            fig3,
+            use_container_width=True
+        )
+
+    # -------------------------
+    # PRACOWNICY
+    # -------------------------
 
     with tab2:
 
-        if "Data" in df_filtered.columns:
+        wszystkie_osoby = []
 
-            trend = (
-                df_filtered
-                .groupby(
-                    df_filtered["Data"].dt.date
+        for row in df_filtered[
+            "Osoba usuwająca postój, awarię"
+        ].dropna():
+
+            osoby = (
+                str(row)
+                .replace(",", "\n")
+                .split("\n")
+            )
+
+            for osoba in osoby:
+
+                osoba = osoba.strip()
+
+                if osoba:
+                    wszystkie_osoby.append(
+                        osoba
+                    )
+
+        if wszystkie_osoby:
+
+            ranking = (
+                pd.Series(
+                    wszystkie_osoby
                 )
-                .size()
-                .reset_index(name="Liczba")
+                .value_counts()
+                .head(15)
             )
 
-            fig3 = px.line(
-                trend,
-                x="Data",
-                y="Liczba",
-                markers=True,
-                title="Trend zgłoszeń"
+            st.bar_chart(ranking)
+
+            st.dataframe(
+                ranking.rename(
+                    "Liczba interwencji"
+                )
             )
 
-            st.plotly_chart(
-                fig3,
-                use_container_width=True
-            )
-
-    # ===========================
+    # -------------------------
     # DANE
-    # ===========================
+    # -------------------------
 
     with tab3:
 
@@ -399,3 +482,4 @@ prewencyjnych dla najbardziej awaryjnych maszyn.
             df_filtered,
             use_container_width=True
         )
+   
