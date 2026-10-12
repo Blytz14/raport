@@ -18,9 +18,9 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file:
 
-    # =============================
+    # ====================================
     # WCZYTANIE PLIKU
-    # =============================
+    # ====================================
 
     df = pd.read_excel(
         uploaded_file,
@@ -32,9 +32,9 @@ if uploaded_file:
         for c in df.columns
     ]
 
-    # =============================
+    # ====================================
     # CZYSZCZENIE
-    # =============================
+    # ====================================
 
     df = df[df["Data"].notna()]
 
@@ -48,9 +48,9 @@ if uploaded_file:
 
     df = df[df["Data"].notna()]
 
-    # =============================
-    # NORMALIZACJA KATEGORII
-    # =============================
+    # ====================================
+    # NORMALIZACJA
+    # ====================================
 
     df["Kategoria awarii"] = (
         df["Kategoria awarii"]
@@ -66,26 +66,29 @@ if uploaded_file:
         .str.strip()
     )
 
-    # =============================
+    # ====================================
     # CZAS
-    # =============================
+    # ====================================
 
     def czas_na_minuty(val):
 
         try:
+
             td = pd.to_timedelta(str(val))
+
             return td.total_seconds() / 60
+
         except:
+
             return 0
 
-    df["Czas_min"] = (
-        df["Czas"]
-        .apply(czas_na_minuty)
+    df["Czas_min"] = df["Czas"].apply(
+        czas_na_minuty
     )
 
-    # =============================
+    # ====================================
     # FILTRY
-    # =============================
+    # ====================================
 
     st.sidebar.header("Filtry")
 
@@ -141,9 +144,9 @@ if uploaded_file:
             (df["Data"] <= pd.Timestamp(data_do))
         ]
 
-    # =============================
+    # ====================================
     # HALA
-    # =============================
+    # ====================================
 
     hale = sorted(
         df_filtered["Hala"]
@@ -164,9 +167,9 @@ if uploaded_file:
         .isin(wybrane_hale)
     ]
 
-    # =============================
+    # ====================================
     # ZMIANA
-    # =============================
+    # ====================================
 
     zmiany = sorted(
         df_filtered["Zmiana"]
@@ -187,27 +190,26 @@ if uploaded_file:
         .isin(wybrane_zmiany)
     ]
 
-    # =============================
-    # KATEGORIA AWARII
-    # =============================
+    # ====================================
+    # KATEGORIA
+    # ====================================
 
     kategorie = sorted(
         df_filtered["Kategoria awarii"]
-        .dropna()
         .unique()
     )
 
     domyslne = [
-        k for k in kategorie
-        if "utrzymanie" in k.lower()
+        x for x in kategorie
+        if "utrzymanie" in x.lower()
     ]
 
-    if len(domyslne) == 0:
+    if not domyslne:
         domyslne = kategorie
 
     wybrane_kategorie = st.sidebar.multiselect(
         "Kategoria awarii",
-        options=kategorie,
+        kategorie,
         default=domyslne
     )
 
@@ -216,13 +218,12 @@ if uploaded_file:
         .isin(wybrane_kategorie)
     ]
 
-    # =============================
-    # PODKATEGORIA AWARII
-    # =============================
+    # ====================================
+    # PODKATEGORIA
+    # ====================================
 
     podkategorie = sorted(
         df_filtered["Podkategoria awarii"]
-        .dropna()
         .unique()
     )
 
@@ -237,44 +238,31 @@ if uploaded_file:
         .isin(wybrane_podkategorie)
     ]
 
-    # =============================
+    # ====================================
     # KPI
-    # =============================
+    # ====================================
 
     zdarzenia = len(df_filtered)
 
-    czas_h = round(
+    postoj_h = round(
         df_filtered["Czas_min"].sum() / 60,
-        1
+        2
     )
 
     mttr = round(
         df_filtered["Czas_min"].mean(),
         1
-    ) if zdarzenia else 0
+    ) if zdarzenia > 0 else 0
 
     maszyny = (
         df_filtered["Maszyna-Urządzenie"]
         .nunique()
     )
 
-    oczekiwanie = len(
-        df_filtered[
-            df_filtered[
-                "Kategoria awarii"
-            ].str.contains(
-                "oczekiwanie",
-                case=False,
-                na=False
-            )
-        ]
-    )
-
     przeglady = len(
         df_filtered[
-            df_filtered[
-                "Podkategoria awarii"
-            ].str.contains(
+            df_filtered["Podkategoria awarii"]
+            .str.contains(
                 "przegl",
                 case=False,
                 na=False
@@ -282,50 +270,130 @@ if uploaded_file:
         ]
     )
 
-    awarie = zdarzenia - przeglady
+    awarie = max(
+        zdarzenia - przeglady,
+        0
+    )
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5 = st.columns(5)
 
-    c1.metric("Zdarzenia", zdarzenia)
-    c2.metric("Awarie", awarie)
-    c3.metric("Przeglądy", przeglady)
-    c4.metric("Oczekiwanie UR", oczekiwanie)
-    c5.metric("Maszyny", maszyny)
-    c6.metric("MTTR [min]", mttr)
+    c1.metric(
+        "Zdarzenia",
+        zdarzenia
+    )
 
-    # =============================
-    # TOP MASZYNY
-    # =============================
+    c2.metric(
+        "Awarie",
+        awarie
+    )
 
-    st.subheader("TOP 10 maszyn")
+    c3.metric(
+        "Przeglądy",
+        przeglady
+    )
 
-    top_maszyny = (
-        df_filtered["Maszyna-Urządzenie"]
-        .value_counts()
-        .head(10)
+    c4.metric(
+        "Postoje [h]",
+        postoj_h
+    )
+
+    c5.metric(
+        "MTTR [min]",
+        mttr
+    )
+
+    st.divider()
+
+    # ====================================
+    # TOP 5 MASZYN WG CZASU POSTOJÓW
+    # ====================================
+
+    st.subheader(
+        "TOP 5 maszyn wg czasu postojów"
+    )
+
+    top_postoje = (
+        df_filtered
+        .groupby(
+            "Maszyna-Urządzenie"
+        )["Czas_min"]
+        .sum()
+        .sort_values(
+            ascending=False
+        )
+        .head(5)
         .reset_index()
     )
 
-    top_maszyny.columns = [
-        "Maszyna",
-        "Liczba"
-    ]
+    top_postoje["Godziny"] = round(
+        top_postoje["Czas_min"] / 60,
+        2
+    )
+
+    fig_postoje = px.bar(
+        top_postoje,
+        x="Maszyna-Urządzenie",
+        y="Godziny",
+        color="Godziny"
+    )
 
     st.plotly_chart(
-        px.bar(
-            top_maszyny,
-            x="Maszyna",
-            y="Liczba",
-            color="Liczba"
-        ),
+        fig_postoje,
         use_container_width=True
     )
 
-    # =============================
-    # TOP PRZYCZYNY
-    # =============================
+    st.dataframe(
+        top_postoje[
+            [
+                "Maszyna-Urządzenie",
+                "Godziny"
+            ]
+        ],
+        use_container_width=True
+    )
 
-    st.subheader("TOP przyczyn")
+    # ====================================
+    # TOP 5 NAJDŁUŻSZYCH AWARII
+    # ====================================
+
+    st.subheader(
+        "TOP 5 najdłuższych awarii"
+    )
+
+    top_awarie = (
+        df_filtered
+        .sort_values(
+            by="Czas_min",
+            ascending=False
+        )
+        .head(5)
+        .copy()
+    )
+
+    top_awarie["Godziny"] = round(
+        top_awarie["Czas_min"] / 60,
+        2
+    )
+
+    st.dataframe(
+        top_awarie[
+            [
+                "Data",
+                "Maszyna-Urządzenie",
+                "Podkategoria awarii",
+                "Godziny"
+            ]
+        ],
+        use_container_width=True
+    )
+
+    # ====================================
+    # TOP PRZYCZYN
+    # ====================================
+
+    st.subheader(
+        "TOP 10 przyczyn"
+    )
 
     top_przyczyny = (
         df_filtered["Podkategoria awarii"]
@@ -334,87 +402,88 @@ if uploaded_file:
         .reset_index()
     )
 
-    top_przyczyny.columns = [
+    top_przyczyny.columns = (
         "Przyczyna",
         "Liczba"
-    ]
+    )
+
+    fig2 = px.bar(
+        top_przyczyny,
+        x="Przyczyna",
+        y="Liczba",
+        color="Liczba"
+    )
 
     st.plotly_chart(
-        px.bar(
-            top_przyczyny,
-            x="Przyczyna",
-            y="Liczba",
-            color="Liczba"
-        ),
+        fig2,
         use_container_width=True
     )
 
-    # =============================
+    # ====================================
     # TREND
-    # =============================
+    # ====================================
 
-    st.subheader("Trend zgłoszeń")
+    st.subheader(
+        "Trend zgłoszeń"
+    )
 
     trend = (
         df_filtered
-        .groupby(df_filtered["Data"].dt.date)
+        .groupby(
+            df_filtered["Data"].dt.date
+        )
         .size()
         .reset_index(name="Liczba")
     )
 
+    fig3 = px.line(
+        trend,
+        x="Data",
+        y="Liczba",
+        markers=True
+    )
+
     st.plotly_chart(
-        px.line(
-            trend,
-            x="Data",
-            y="Liczba",
-            markers=True
-        ),
+        fig3,
         use_container_width=True
     )
 
-    # =============================
-    # PRACOWNICY
-    # =============================
+    # ====================================
+    # RAPORT MENEDŻERSKI
+    # ====================================
 
-    st.subheader("Ranking pracowników")
+    if len(df_filtered):
 
-    osoby = []
-
-    for wpis in df_filtered[
-        "Osoba usuwająca postój, awarię"
-    ].dropna():
-
-        osoby_split = (
-            str(wpis)
-            .replace(",", "\n")
-            .split("\n")
+        top_maszyna = (
+            top_postoje.iloc[0]["Maszyna-Urządzenie"]
         )
 
-        for osoba in osoby_split:
-
-            osoba = osoba.strip()
-
-            if osoba:
-                osoby.append(osoba)
-
-    if osoby:
-
-        ranking = (
-            pd.Series(osoby)
-            .value_counts()
-            .head(20)
+        top_czas = (
+            top_postoje.iloc[0]["Godziny"]
         )
 
-        st.bar_chart(ranking)
+        st.info(
+            f"""
+W analizowanym okresie odnotowano {zdarzenia} zdarzeń.
 
-    # =============================
+Łączny czas postojów wyniósł {postoj_h} godzin.
+
+Średni czas zdarzenia (MTTR) wyniósł {mttr} minut.
+
+Największy udział w postojach miała maszyna:
+{top_maszyna} ({top_czas} h).
+
+Zaleca się analizę przyczyn źródłowych dla maszyn generujących największe straty czasu.
+"""
+        )
+
+    # ====================================
     # DANE
-    # =============================
+    # ====================================
 
-    with st.expander("Pokaż dane"):
+    with st.expander("Pokaż dane źródłowe"):
 
         st.dataframe(
             df_filtered,
             use_container_width=True
         )
-    
