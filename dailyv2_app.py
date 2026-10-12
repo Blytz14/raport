@@ -305,18 +305,16 @@ if uploaded_file:
     st.divider()
 
     # ====================================
-    # TOP 5 MASZYN WG CZASU POSTOJÓW
+    # TOP 5 TYPÓW MASZYN WG CZASU POSTOJÓW
     # ====================================
 
     st.subheader(
-        "TOP 5 maszyn wg czasu postojów"
+        "TOP 5 typów maszyn wg czasu postojów"
     )
 
     top_postoje = (
         df_filtered
-        .groupby(
-            "Maszyna-Urządzenie"
-        )["Czas_min"]
+        .groupby("Typ")["Czas_min"]
         .sum()
         .sort_values(
             ascending=False
@@ -332,9 +330,10 @@ if uploaded_file:
 
     fig_postoje = px.bar(
         top_postoje,
-        x="Maszyna-Urządzenie",
+        x="Typ",
         y="Godziny",
-        color="Godziny"
+        color="Godziny",
+        text="Godziny"
     )
 
     st.plotly_chart(
@@ -345,7 +344,7 @@ if uploaded_file:
     st.dataframe(
         top_postoje[
             [
-                "Maszyna-Urządzenie",
+                "Typ",
                 "Godziny"
             ]
         ],
@@ -379,6 +378,7 @@ if uploaded_file:
         top_awarie[
             [
                 "Data",
+                "Typ",
                 "Maszyna-Urządzenie",
                 "Podkategoria awarii",
                 "Godziny"
@@ -402,16 +402,17 @@ if uploaded_file:
         .reset_index()
     )
 
-    top_przyczyny.columns = (
+    top_przyczyny.columns = [
         "Przyczyna",
         "Liczba"
-    )
+    ]
 
     fig2 = px.bar(
         top_przyczyny,
         x="Przyczyna",
         y="Liczba",
-        color="Liczba"
+        color="Liczba",
+        text="Liczba"
     )
 
     st.plotly_chart(
@@ -433,7 +434,9 @@ if uploaded_file:
             df_filtered["Data"].dt.date
         )
         .size()
-        .reset_index(name="Liczba")
+        .reset_index(
+            name="Liczba"
+        )
     )
 
     fig3 = px.line(
@@ -454,8 +457,8 @@ if uploaded_file:
 
     if len(df_filtered):
 
-        top_maszyna = (
-            top_postoje.iloc[0]["Maszyna-Urządzenie"]
+        top_typ = (
+            top_postoje.iloc[0]["Typ"]
         )
 
         top_czas = (
@@ -470,10 +473,17 @@ W analizowanym okresie odnotowano {zdarzenia} zdarzeń.
 
 Średni czas zdarzenia (MTTR) wyniósł {mttr} minut.
 
-Największy udział w postojach miała maszyna:
-{top_maszyna} ({top_czas} h).
+Największy udział w postojach miał typ maszyny:
 
-Zaleca się analizę przyczyn źródłowych dla maszyn generujących największe straty czasu.
+{top_typ}
+
+Łączny czas postojów dla tego typu wyniósł:
+
+{top_czas} h.
+
+Zaleca się przeprowadzenie analizy przyczyn źródłowych
+oraz zwiększenie działań prewencyjnych dla maszyn
+tego typu.
 """
         )
 
@@ -481,7 +491,9 @@ Zaleca się analizę przyczyn źródłowych dla maszyn generujących największe
     # DANE
     # ====================================
 
-    with st.expander("Pokaż dane źródłowe"):
+    with st.expander(
+        "Pokaż dane źródłowe"
+    ):
 
         st.dataframe(
             df_filtered,
